@@ -1,0 +1,162 @@
+--- /root/ffmpeg.c	2019-04-06 19:24:25.288014200 +0000
++++ fftools/ffmpeg.c	2019-04-07 15:11:22.399312700 +0000
+@@ -33,6 +33,16 @@
+ #include <stdatomic.h>
+ #include <stdint.h>
+ 
++#ifdef _WIN32
++	#include <winsock2.h>
++	#include <fcntl.h>
++#else
++	#include <sys/socket.h>
++	#include <netinet/in.h>
++	#include <stdio.h>
++	#include <arpa/inet.h>
++#endif
++
+ #if HAVE_IO_H
+ #include <io.h>
+ #endif
+@@ -106,6 +116,12 @@
+ 
+ #include "libavutil/avassert.h"
+ 
++#ifdef _WIN32
++	SOCKET sockfd;
++#else
++	int sockfd;
++#endif
++
+ const char program_name[] = "ffmpeg";
+ const int program_birth_year = 2000;
+ 
+@@ -168,6 +184,8 @@
+ static void free_input_threads(void);
+ #endif
+ 
++int frame_st_size = 0;
++
+ /* sub2video hack:
+    Convert subtitles to video with alpha to insert them in filter graphs.
+    This is a temporary solution until libavfilter gets real subtitles support.
+@@ -1333,6 +1351,8 @@
+          */
+         ost->frame_number++;
+ 
++        frame_st_size = frame_size;
++
+         if (vstats_filename && frame_size)
+             do_video_stats(ost, frame_size);
+     }
+@@ -1658,6 +1678,7 @@
+     const char *hours_sign;
+     int ret;
+     float t;
++    double ti1, act_st_bitrate, avg_st_bitrate;
+ 
+     if (!print_stats && !is_last_report && !progress_avio)
+         return;
+@@ -1703,6 +1724,18 @@
+             fps = t > 1 ? frame_number / t : 0;
+             av_bprintf(&buf, "frame=%5d fps=%3.*f q=%3.1f ",
+                      frame_number, fps < 9.95, fps, q);
++            /* compute pts value */
++            ti1 = av_stream_get_end_pts(ost->st) * av_q2d(ost->st->time_base);
++            if (ti1 < 0.01)
++               ti1 = 0.01;
++            act_st_bitrate = (frame_st_size * 8) / av_q2d(enc->time_base) / 1000.0;
++            avg_st_bitrate = (double)(ost->data_size * 8) / ti1 / 1000.0;
++            av_bprintf(&buf, "act_time=%0.3f ", ti1);
++            av_bprintf(&buf_script, "act_time=%0.3f\n", ti1);
++            av_bprintf(&buf, "act_bitrate=%7.1fkbits/s ", act_st_bitrate);
++            av_bprintf(&buf_script, "act_bitrate=%7.1fkbits/s\n", act_st_bitrate);
++            av_bprintf(&buf, "avg_bitrate=%7.1fkbits/s ", avg_st_bitrate);
++            av_bprintf(&buf_script, "avg_bitrate=%7.1fkbits/s\n", avg_st_bitrate);
+             av_bprintf(&buf_script, "frame=%d\n", frame_number);
+             av_bprintf(&buf_script, "fps=%.2f\n", fps);
+             av_bprintf(&buf_script, "stream_%d_%d_q=%.1f\n",
+@@ -4673,6 +4706,12 @@
+         goto fail;
+ #endif
+ 
++	char socket_data[4];
++	int data;
++	uint32_t bitrate;
++	OutputStream *enc_ost;
++	AVCodecContext *enc_ctx;
++	
+     while (!received_sigterm) {
+         int64_t cur_time= av_gettime_relative();
+ 
+@@ -4687,6 +4726,28 @@
+             break;
+         }
+ 
++		data = recvfrom(sockfd, socket_data, 4, 0, NULL, NULL);
++		if(data >= 0) {
++			av_log(NULL, AV_LOG_INFO, "DATA>=0\n");
++		}
++		if (data >= 4) {
++			bitrate = *((uint32_t*)socket_data);
++			for (i = 0; i < nb_output_streams; i++) {
++				enc_ost = output_streams[i];
++
++				if (enc_ost->attachment_filename)
++					continue;
++
++				enc_ctx = enc_ost->stream_copy ? enc_ost->st->codec : enc_ost->enc_ctx;
++				if (enc_ctx->codec_type == AVMEDIA_TYPE_VIDEO) {
++					enc_ctx->bit_rate = bitrate;
++					enc_ctx->rc_max_rate = bitrate;
++					enc_ctx->rc_buffer_size = bitrate/2;
++				}
++			}
++			av_log(NULL, AV_LOG_INFO, "New bitrate: %d\n", bitrate);
++		}
++		
+         ret = transcode_step();
+         if (ret < 0 && ret != AVERROR_EOF) {
+             av_log(NULL, AV_LOG_ERROR, "Error while filtering: %s\n", av_err2str(ret));
+@@ -4837,12 +4898,41 @@
+ static void log_callback_null(void *ptr, int level, const char *fmt, va_list vl)
+ {
+ }
+-
++static void start_bitrate_server() {
++	struct sockaddr_in servaddr;
++	#ifdef _WIN32
++		u_long iMode;
++		WSADATA wsa;
++		if (WSAStartup(MAKEWORD(2,2),&wsa) != 0) {
++			printf("Failed. Error Code : %d",WSAGetLastError());
++			exit(EXIT_FAILURE);
++		}
++	#else
++		int nonBlocking;
++	#endif
++	sockfd = socket(AF_INET , SOCK_DGRAM , 0 );
++	servaddr.sin_family = AF_INET;
++	servaddr.sin_addr.s_addr = inet_addr("127.0.0.1");
++	servaddr.sin_port = htons( 32000 );
++	bind(sockfd,(struct sockaddr *)&servaddr,sizeof(servaddr));
++	#ifdef _WIN32
++		iMode = 1;
++		ioctlsocket(sockfd, FIONBIO, &iMode);
++	#else
++		nonBlocking = 1;
++		if (fcntl(sockfd, F_SETFL, O_NONBLOCK, nonBlocking) == -1) {
++			printf( "failed to set non-blocking socket\n" );
++			exit(1);
++		}
++	#endif
++}
+ int main(int argc, char **argv)
+ {
+     int i, ret;
+     BenchmarkTimeStamps ti;
+ 
++    start_bitrate_server();
++
+     init_dynload();
+ 
+     register_exit(ffmpeg_cleanup);
