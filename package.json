@@ -1,37 +1,32 @@
 {
-  "name": "5gmedia-vcompression-lb",
+  "name": "5gmedia-vcompression",
   "version": "1.0.0",
-  "description": "vCompression Engine with built-in load balancer that can be controlled via a RESTful API.",
+  "description": "vCompression Engine with resolution change on-the-fly.",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/BitTubes/5gmedia-vcompression-lb.git"
+    "url": "git+https://github.com/BitTubes/5gmedia-vcompression.git"
   },
   "keywords": [
     "ffmpeg",
     "node.js",
     "fastify",
-    "load",
-    "balancer",
+    "resolution",
     "vnf",
     "5g-media"
   ],
   "author": "Igor Fritzsch",
   "license": "UNLICENSED",
   "bugs": {
-    "url": "https://github.com/BitTubes/5gmedia-vcompression-lb/issues"
+    "url": "https://github.com/BitTubes/5gmedia-vcompression/issues"
   },
-  "homepage": "https://github.com/BitTubes/5gmedia-vcompression-lb#readme",
+  "homepage": "https://github.com/BitTubes/5gmedia-vcompression#readme",
   "dependencies": {
-    "dotenv": "^7.0.0",
-    "fastify": "^1.14.1",
-    "kafka-node": "^4.0.2",
-    "macaddress": "^0.2.9",
-    "node-media-server": "^1.4.10",
-    "pidusage": "^2.0.17",
-    "request": "^2.88.0"
+    "dev-null": "^0.1.1",
+    "dotenv": "^8.2.0",
+    "fastify": "^1.14.1"
   }
 }

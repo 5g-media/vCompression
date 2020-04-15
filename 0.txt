@@ -1,3 +1,0 @@
-fps: 25
-time: '00:00:00.00'
-bitrate: '0kbits/s'
